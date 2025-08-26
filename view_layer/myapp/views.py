@@ -6,6 +6,7 @@ from django.shortcuts import redirect
 from myapp.forms import LogMessageForm
 from myapp.models import LogMessage
 from django.views.generic import ListView
+from django.views.generic import TemplateView
 
 class HomeListView(ListView):
     """Renders the home page, with a list of all messages."""
@@ -37,3 +38,6 @@ def current_datetime(request):
     html = '<html lang="en"><body>It is now %s.</body></html>' % now
     return HttpResponse(html)
 
+
+class AboutView(TemplateView):
+    template_name = "hello/about.html"
