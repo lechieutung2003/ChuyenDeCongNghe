@@ -7,7 +7,6 @@ from myapp.forms import LogMessageForm
 from myapp.models import LogMessage
 from django.views.generic import ListView
 
-
 class HomeListView(ListView):
     """Renders the home page, with a list of all messages."""
     model = LogMessage
@@ -32,3 +31,9 @@ def log_message(request):
             return redirect("home")
     else:
         return render(request, "hello/log_message.html", {"form": form})
+    
+def current_datetime(request):
+    now = datetime.now()
+    html = '<html lang="en"><body>It is now %s.</body></html>' % now
+    return HttpResponse(html)
+

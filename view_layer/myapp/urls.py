@@ -12,6 +12,7 @@ urlpatterns = [
     path("", home_list_view, name="home"),
     path("about/", views.about, name="about"),
     path("log/", views.log_message, name="log"),
+    path("now/", views.current_datetime, name="current_datetime")
 
 ]
 
