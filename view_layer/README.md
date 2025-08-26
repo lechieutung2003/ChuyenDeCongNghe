@@ -1,21 +1,57 @@
-# Django Template
+## Giới thiệu
+Đây là dự án mẫu Django dùng để quản lý và ghi lại các log message do người dùng nhập vào.
 
-This sample repo contains the recommended structure for a Python Django project. In this sample, we use `django` to build a web application and the `unittest` to run tests.
+## Yêu cầu hệ thống
+- Python 3.10 trở lên
+- pip
+- Git
 
-For a more in-depth tutorial, see our [Django tutorial](https://code.visualstudio.com/docs/datascience/data-science-tutorial).
+## Các bước thực hiện
 
-The code in this repo aims to follow Python style guidelines as outlined in [PEP 8](https://peps.python.org/pep-0008/).
+### 1. Clone dự án
+```sh
+git clone <repo-url>
+cd view_layer
+```
 
-## Running the Sample
+### 2. Tạo môi trường ảo và cài đặt package
+```sh
+python -m venv venv
+venv\Scripts\activate  # Windows
+source venv/bin/activate  # Linux/Mac
 
-To successfully run this example, we recommend the following VS Code extensions:
-- [Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
-- [Python Debugger](https://marketplace.visualstudio.com/items?itemName=ms-python.debugpy)
-- [Pylance](https://marketplace.visualstudio.com/items?itemName=ms-python.vscode-pylance) 
+pip install -r requirements.txt
+```
 
-- Open the template folder in VS Code (**File** > **Open Folder...**)
-- Create a Python virtual environment using the **Python: Create Environment** command found in the Command Palette (**View > Command Palette**). Ensure you install dependencies found in the `pyproject.toml` file
-- Ensure your newly created environment is selected using the **Python: Select Interpreter** command found in the Command Palette
-- Create and initialize the database by running `python manage.py migrate` in an activated terminal. 
-- Run the app using the Run and Debug view or by pressing `F5`
-- Run tests by running `python manage.py test` in an activated terminal
+### 3. Khởi tạo database
+```sh
+python manage.py migrate
+```
+
+### 4. Chạy server phát triển
+```sh
+python manage.py runserver
+```
+Truy cập [http://127.0.0.1:8000/] trên trình duyệt.
+
+### 5. Các chức năng chính
+- **Trang chủ:** Hiển thị danh sách các log message mới nhất.
+- **Thêm log:** Nhấn "Add Log Message" để ghi lại thông điệp mới.
+- **Trang giới thiệu:** Xem thông tin về ứng dụng.
+- **Xem thời gian hiện tại:** Truy cập `/now/` để xem thời gian hệ thống.
+
+### 6. Cấu trúc thư mục
+- `manage.py`: File quản lý dự án Django.
+- `web_django/`: Cấu hình dự án.
+- `myapp/`: Ứng dụng chính, chứa models, views, forms, templates.
+- `requirements.txt`: Danh sách package cần thiết.
+- `db.sqlite3`: Database SQLite.
+
+### 7. Tùy chỉnh
+- Thay đổi giao diện bằng cách chỉnh sửa các file trong `myapp/templates/hello/`.
+- Thêm chức năng mới bằng cách bổ sung view và url trong `myapp/views.py` và `myapp/urls.py`.
+
+---
+
+## Tài liệu tham khảo
+- [Django Documentation](https://docs.djangoproject.com/en/5.0/)
