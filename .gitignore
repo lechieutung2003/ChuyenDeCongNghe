@@ -1,0 +1,5 @@
+/DRFTutorial/venv
+/DRFTutorial/env
+venv/
+**/__pycache__/
+**/.vscode/
