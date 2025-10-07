@@ -36,6 +36,7 @@ from core.settings.base import (
 )
 from base.views.base import BaseViewSet
 from base.services import Verification
+from base.pagination import CustomPagination, StandardPagination, SmallPagination
 from oauth.serializers import UserShortSerializer
 from oauth.permissions import IsAdministrator
 from ..models import Employee
@@ -48,7 +49,6 @@ from ..filters import (
     UserSpecificFilterBackend
 )
 from django.db.models import Q
-from django.core.paginator import Paginator
 from rest_framework import status
 
 User = get_user_model()
@@ -57,6 +57,9 @@ AccessToken = get_access_token_model()
 class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
     queryset = Employee.objects.exclude(roles__name__in=["Super Administrator"]).order_by('-created_at', 'first_name', 'last_name')
     serializer_class = EmployeeSerializer
+    
+    # ✅ DRF PAGINATION CONFIGURATION
+    pagination_class = CustomPagination  # Use DRF standard pagination
     
     # ✅ DRF FILTERING CONFIGURATION
     filter_backends = [
@@ -158,12 +161,12 @@ class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
         
         return queryset
 
-    # ✅ UPDATED LIST METHOD WITH DRF FILTERING
+    # ✅ UPDATED LIST METHOD WITH DRF PAGINATION & FILTERING
     @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     @method_decorator(vary_on_headers("Authorization"))  # Vary on auth header
     def list(self, request, *args, **kwargs):
         """
-        List employees with DRF filtering support
+        List employees with DRF filtering and pagination support
         
         Supported filters:
         - search: search across name, email, area, phone
@@ -172,32 +175,19 @@ class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
         - salary__gte, salary__lte: salary range
         - join_date__year, join_date__month: date filters
         - ordering: order results (-field for desc)
+        - page: page number for pagination
+        - page_size: items per page
         
         Examples:
-        - GET /employees/?search=John&area=IT
+        - GET /employees/?search=John&area=IT&page=2&page_size=20
         - GET /employees/?salary__gte=50000&ordering=-join_date
         - GET /employees/?status=1&search=manager
         """
         try:
-            # Use DRF's standard filtering instead of manual filtering
+            # Use DRF's standard filtering
             queryset = self.filter_queryset(self.get_queryset())
             
-            # Legacy support: handle old computed_status parameter manually
-            # (since this requires custom logic that DRF filters can't handle perfectly)
-            computed_status = request.query_params.get('computed_status')
-            if computed_status is not None and computed_status != '':
-                try:
-                    status_value = int(computed_status)
-                    
-                    if status_value == 0:
-                        # No working hours set - handled by filter
-                        pass  # Already handled by EmployeeFilter
-                    elif status_value in [1, 2]:
-                        # Has working hours - will be filtered in serialization
-                        pass  # Partial filtering in queryset, final filter in serializer
-                        
-                except (ValueError, TypeError):
-                    pass
+            # Handle custom computed_status filtering (requires special logic)
             computed_status = request.query_params.get('computed_status')
             if computed_status is not None and computed_status != '':
                 try:
@@ -210,17 +200,17 @@ class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
                             Q(working_end_time__isnull=True)
                         )
                     elif status_value in [1, 2]:
-                        # Has working hours, filter by computed status
-                        # This will be handled by serializer computation
+                        # Has working hours - filter in queryset first
                         queryset = queryset.filter(
                             working_start_time__isnull=False,
                             working_end_time__isnull=False
                         )
-                        # Additional filtering will happen in serializer
+                        # Additional filtering will happen after serialization
                         
                 except (ValueError, TypeError):
                     pass
             
+            # Handle regular status filtering if not using computed_status
             status_filter = request.query_params.get('status')
             if status_filter is not None and status_filter != '' and not computed_status:
                 try:
@@ -229,74 +219,31 @@ class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
                 except (ValueError, TypeError):
                     pass
             
-            
-            # Get pagination parameters
-            try:
-                page = int(request.query_params.get('page', 1))
-                page_size = int(request.query_params.get('page_size', 10))
-            except (ValueError, TypeError):
-                page = 1
-                page_size = 10
-            
-            # Ensure reasonable limits
-            page_size = min(max(page_size, 1), 100)  # Between 1 and 100
-            page = max(page, 1)  # At least 1
-            
-            # Apply pagination
-            paginator = Paginator(queryset, page_size)
-            
-            try:
-                page_obj = paginator.get_page(page)
-            except Exception as e:
-                print(f"Pagination error: {e}")
-                page_obj = paginator.get_page(1)  # Fallback to first page
-            
-            # Serialize data with error handling
-            try:
-                serializer = self.get_serializer(page_obj, many=True)
+            # ✅ USE DRF STANDARD PAGINATION
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
                 serialized_data = serializer.data
+                
+                # Apply computed_status post-filtering if needed
                 if computed_status is not None and computed_status != '':
                     try:
                         status_value = int(computed_status)
                         if status_value in [1, 2]:
-                            # Filter serialized data by computed_status
                             serialized_data = [
                                 item for item in serialized_data 
                                 if item.get('computed_status') == status_value
                             ]
                     except (ValueError, TypeError):
                         pass
-            except Exception as e:
-                print(f"Serialization error: {e}")
-                # Fallback: serialize without computed fields
-                serialized_data = []
-                for employee in page_obj:
-                    try:
-                        emp_serializer = self.get_serializer(employee)
-                        serialized_data.append(emp_serializer.data)
-                    except Exception as emp_error:
-                        print(f"Error serializing employee {employee.id}: {emp_error}")
-                        # Add minimal employee data
-                        serialized_data.append({
-                            'id': str(employee.id),
-                            'first_name': employee.first_name or '',
-                            'last_name': employee.last_name or '',
-                            'work_mail': employee.work_mail or '',
-                            'area': employee.area or '',
-                            'status': employee.status,
-                            'is_currently_active': False,
-                            'current_status_text': 'Status unavailable'
-                        })
+                
+                # Return paginated response using DRF pagination
+                response = self.get_paginated_response(serialized_data)
+                return response
             
-            return Response({
-                'results': serialized_data,
-                'count': paginator.count,
-                'num_pages': paginator.num_pages,
-                'current_page': page,
-                'page_size': page_size,
-                'has_next': page_obj.has_next(),
-                'has_previous': page_obj.has_previous(),
-            }, status=status.HTTP_200_OK)
+            # Fallback: if pagination is disabled
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
             
         except Exception as e:
             print(f"Error in employee list: {e}")
