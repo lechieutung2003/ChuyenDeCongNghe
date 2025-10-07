@@ -6,6 +6,8 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.views.decorators.vary import vary_on_cookie, vary_on_headers
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.status import (
@@ -39,6 +41,12 @@ from oauth.permissions import IsAdministrator
 from ..models import Employee
 from ..serializers import EmployeeSerializer
 from ..services import EmployeeService
+from ..filters import (
+    EmployeeFilter,
+    EmployeeSearchFilter,
+    EmployeeOrderingFilter,
+    UserSpecificFilterBackend
+)
 from django.db.models import Q
 from django.core.paginator import Paginator
 from rest_framework import status
@@ -49,6 +57,60 @@ AccessToken = get_access_token_model()
 class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
     queryset = Employee.objects.exclude(roles__name__in=["Super Administrator"]).order_by('-created_at', 'first_name', 'last_name')
     serializer_class = EmployeeSerializer
+    
+    # ✅ DRF FILTERING CONFIGURATION
+    filter_backends = [
+        DjangoFilterBackend,           # Advanced field filtering
+        EmployeeSearchFilter,          # Custom search functionality
+        EmployeeOrderingFilter,        # Custom ordering
+        UserSpecificFilterBackend,     # User permission-based filtering
+    ]
+    
+    # Django-filter configuration
+    filterset_class = EmployeeFilter
+    
+    # Simple field-based filtering (alternative to filterset_class)
+    filterset_fields = {
+        'first_name': ['exact', 'icontains', 'istartswith'],
+        'last_name': ['exact', 'icontains', 'istartswith'],
+        'work_mail': ['exact', 'icontains'],
+        'area': ['exact', 'icontains'],
+        'status': ['exact'],
+        'gender': ['exact'],
+        'join_date': ['exact', 'gte', 'lte', 'year', 'month'],
+        'salary': ['exact', 'gte', 'lte', 'isnull'],
+    }
+    
+    # SearchFilter configuration
+    search_fields = [
+        'first_name',
+        'last_name', 
+        'work_mail',
+        'area',
+        'phone',
+        '=work_mail',        # Exact match
+        '^first_name',       # Starts with
+        '^last_name',        # Starts with
+        'user__email',       # Related field search
+    ]
+    
+    # OrderingFilter configuration
+    ordering_fields = [
+        'first_name',
+        'last_name',
+        'work_mail',
+        'area',
+        'join_date',
+        'created_at',
+        'completed_orders_count',
+        'total_hours_worked',
+        'status',
+        'salary',
+    ]
+    
+    ordering = ['-created_at', 'first_name', 'last_name']  # Default ordering
+    
+    # Legacy search_map for backwards compatibility
     search_map = {
         "first_name": "icontains",
         "last_name": "icontains",
@@ -96,29 +158,46 @@ class EmployeeViewSet(OAuthLibMixin, BaseViewSet):
         
         return queryset
 
-    # Sửa indentation - đưa list ra ngoài create()
+    # ✅ UPDATED LIST METHOD WITH DRF FILTERING
     @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     @method_decorator(vary_on_headers("Authorization"))  # Vary on auth header
     def list(self, request, *args, **kwargs):
-        """Override list method to handle pagination and filtering properly"""
+        """
+        List employees with DRF filtering support
+        
+        Supported filters:
+        - search: search across name, email, area, phone
+        - area: filter by work area
+        - status: filter by working status  
+        - salary__gte, salary__lte: salary range
+        - join_date__year, join_date__month: date filters
+        - ordering: order results (-field for desc)
+        
+        Examples:
+        - GET /employees/?search=John&area=IT
+        - GET /employees/?salary__gte=50000&ordering=-join_date
+        - GET /employees/?status=1&search=manager
+        """
         try:
-            # Get filtered queryset
-            queryset = self.get_queryset()
+            # Use DRF's standard filtering instead of manual filtering
+            queryset = self.filter_queryset(self.get_queryset())
             
-            # Apply additional filters from query params
-            search = request.query_params.get('search')
-            if search:
-                queryset = queryset.filter(
-                    Q(first_name__icontains=search) |
-                    Q(last_name__icontains=search) |
-                    Q(work_mail__icontains=search) |
-                    Q(phone__icontains=search) |
-                    Q(area__icontains=search)
-                )
-            
-            area = request.query_params.get('area')
-            if area:
-                queryset = queryset.filter(area__icontains=area)
+            # Legacy support: handle old computed_status parameter manually
+            # (since this requires custom logic that DRF filters can't handle perfectly)
+            computed_status = request.query_params.get('computed_status')
+            if computed_status is not None and computed_status != '':
+                try:
+                    status_value = int(computed_status)
+                    
+                    if status_value == 0:
+                        # No working hours set - handled by filter
+                        pass  # Already handled by EmployeeFilter
+                    elif status_value in [1, 2]:
+                        # Has working hours - will be filtered in serialization
+                        pass  # Partial filtering in queryset, final filter in serializer
+                        
+                except (ValueError, TypeError):
+                    pass
             computed_status = request.query_params.get('computed_status')
             if computed_status is not None and computed_status != '':
                 try:
