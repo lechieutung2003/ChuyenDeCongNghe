@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.fields import UUIDField
 from rest_framework.exceptions import ValidationError
+from rest_framework.validators import UniqueValidator
 from datetime import datetime, time
 from django.utils import timezone
 import pytz
@@ -10,6 +11,18 @@ from hr.models.skill import EmployeeSkill, Skill
 from oauth.models import User, Role
 from oauth.serializers import UserShortSerializer, RoleShortSerializer
 from .employee_additional_information import EmployeeAdditionalInformationSerializer
+from ..validators import (
+    validate_phone_number,
+    validate_working_hours,
+    validate_salary_amount,
+    validate_employee_name,
+    validate_work_area,
+    WorkingHoursValidator,
+    SkillsValidator,
+    AgeValidator,
+    JoinDateValidator,
+    UniqueWorkEmailValidator,
+)
 
 
 class EmployeeSerializer(WritableNestedSerializer):
@@ -25,9 +38,77 @@ class EmployeeSerializer(WritableNestedSerializer):
     additional_information = EmployeeAdditionalInformationSerializer(many=True, required=False)
     computed_status = serializers.SerializerMethodField()
     status_text = serializers.SerializerMethodField()
+    
+    first_name = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        validators=[validate_employee_name]
+    )
+    
+    last_name = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        validators=[validate_employee_name]
+    )
+    
+    work_mail = serializers.EmailField(
+        max_length=255,
+        required=False,
+        validators=[
+            UniqueValidator(
+                queryset=Employee.objects.all(),
+                message="An employee with this work email already exists."
+            ),
+            UniqueWorkEmailValidator()
+        ]
+    )
+    
+    phone = serializers.CharField(
+        max_length=15,
+        required=False,
+        allow_blank=True,
+        validators=[validate_phone_number]
+    )
+    
+    area = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        validators=[validate_work_area]
+    )
+    
+    working_start_time = serializers.TimeField(
+        required=False,
+        allow_null=True,
+        validators=[validate_working_hours]
+    )
+    
+    working_end_time = serializers.TimeField(
+        required=False,
+        allow_null=True,
+        validators=[validate_working_hours]
+    )
+    
+    salary = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+        validators=[validate_salary_amount]
+    )
+    
+    date_of_birth = serializers.DateField(
+        required=False,
+        allow_null=True,
+        validators=[AgeValidator(min_age=16, max_age=70)]
+    )
+    
     skills = serializers.ListField(
         child=serializers.CharField(),
         required=False,
+        validators=[SkillsValidator(max_skills=10)],
         help_text="List of skill names to assign to the employee"
     )
 
@@ -95,6 +176,12 @@ class EmployeeSerializer(WritableNestedSerializer):
         }
         nested_create_fields = ["user"]
         nested_update_fields = ["additional_information"]
+        
+        # ✅ OBJECT-LEVEL VALIDATORS
+        validators = [
+            WorkingHoursValidator(),
+            JoinDateValidator(),
+        ]
     
     def get_computed_status(self, obj):
         """Compute current status based on working hours"""
@@ -103,6 +190,66 @@ class EmployeeSerializer(WritableNestedSerializer):
     def get_status_text(self, obj):
         """Get human-readable status text"""
         return self._calculate_current_status(obj)['status_text']
+    
+    # ✅ FIELD-LEVEL VALIDATION METHODS
+    def validate_first_name(self, value):
+        """Additional validation for first name"""
+        if value and len(value.strip()) == 0:
+            raise serializers.ValidationError("First name cannot be only whitespace")
+        return value.strip() if value else value
+    
+    def validate_last_name(self, value):
+        """Additional validation for last name"""
+        if value and len(value.strip()) == 0:
+            raise serializers.ValidationError("Last name cannot be only whitespace")
+        return value.strip() if value else value
+    
+    def validate_personal_mail(self, value):
+        """Validate personal email format"""
+        if not value:
+            return value
+        
+        # Additional email validation if needed
+        if value == self.initial_data.get('work_mail'):
+            raise serializers.ValidationError(
+                "Personal email cannot be the same as work email"
+            )
+        
+        return value
+    
+    # ✅ OBJECT-LEVEL VALIDATION
+    def validate(self, attrs):
+        """Object-level validation"""
+        # Call parent validation first
+        attrs = super().validate(attrs)
+        
+        # Additional business logic validation
+        working_start = attrs.get('working_start_time')
+        working_end = attrs.get('working_end_time')
+        
+        if working_start and working_end:
+            # Calculate working hours per day
+            if working_start <= working_end:
+                # Same day shift
+                hours = (working_end.hour * 60 + working_end.minute) - (working_start.hour * 60 + working_start.minute)
+            else:
+                # Overnight shift
+                hours = (24 * 60) - (working_start.hour * 60 + working_start.minute) + (working_end.hour * 60 + working_end.minute)
+            
+            hours = hours / 60  # Convert to hours
+            
+            # Validate reasonable working hours (max 16 hours per day)
+            if hours > 16:
+                raise serializers.ValidationError({
+                    'working_hours': 'Working hours cannot exceed 16 hours per day'
+                })
+            
+            if hours < 1:
+                raise serializers.ValidationError({
+                    'working_hours': 'Working hours must be at least 1 hour'
+                })
+        
+        return attrs
     
     def _calculate_current_status(self, obj):
         """
